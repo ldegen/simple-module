@@ -3,7 +3,7 @@ class SimpleModule
   # Add properties to {SimpleModule} class.
   #
   # @param [Object] obj The properties of {obj} will be copied to {SimpleModule}
-  #                     , except property named `extended`, which is a function
+  #                     except a property named `extended`, which is a function
   #                     that will be called after copy operation.
   @extend: (obj) ->
     unless obj and typeof obj == 'object'
@@ -13,13 +13,12 @@ class SimpleModule
       @[key] = val
 
     obj.extended?.call(@)
-    @
 
   # Add properties to instance of {SimpleModule} class.
   #
   # @param [Hash] obj The properties of {obj} will be copied to prototype of
-  #                   {SimpleModule}, except property named `included`, which is
-  #                   a function that will be called after copy operation.
+  #                   {SimpleModule}, except a property named `included`, which
+  #                   is a function that will be called after copy operation.
   @include: (obj) ->
     unless obj and typeof obj == 'object'
       throw new Error('SimpleModule.include: param should be an object')
@@ -28,30 +27,22 @@ class SimpleModule
       @::[key] = val
 
     obj.included?.call(@)
-    @
 
-  # @property [Hash] The registered plugins.
-  @plugins: {}
+  #_connectedClasses: []
 
-  # Register plugin for {SimpleModule}
-  #
-  # @param [String] name The name of plugin.
-  # @param [Function] cls The class of plugin.
-  #
-  @plugin: (name, cls) ->
-    unless name and typeof name == 'string'
-      throw new Error 'SimpleModule.plugin: first param should be a string'
+  @connect: (cls) ->
+    unless cls and typeof cls == 'function'
+      throw new Error('SimpleModule.connect: param should be a function')
 
-    unless typeof cls == 'function'
-      throw new Error 'SimpleModule.plugin: second param should be a class'
+    unless cls.pluginName
+      throw new Error('SimpleModule.connect: cannot connect plugin without pluginName')
 
-    @plugins[name] = cls
-    @
+    cls::_connected = true
+    @_connectedClasses = [] unless @_connectedClasses
+    @_connectedClasses.push(cls)
+    @[cls.pluginName] = cls
 
-  @opts:
-    plugins: []
-
-  plugins: {}
+  opts: {}
 
   # Create a new instance of {SimpleModule}
   #
@@ -59,21 +50,72 @@ class SimpleModule
   #
   # @return The new instance.
   constructor: (opts) ->
-    @opts = $.extend {}, SimpleModule.opts, opts
+    @opts = $.extend {}, @opts, opts
 
-    @opts.plugins.forEach (name) =>
-      @plugins[name] = new SimpleModule.plugins[name](@)
+    @constructor._connectedClasses ||= []
+    # Create singleton instances of connected classes
+    instances = for cls in @constructor._connectedClasses
+      # lowercase first letter of class name
+      name = cls.pluginName.charAt(0).toLowerCase() + cls.pluginName.slice(1)
+      # store reference to parent module
+      cls::_module = @ if cls::_connected
+      # add newly created/singleton instance to “this” module
+      @[name] = new cls()
+
+    # Are we a mounted submodule?
+    if @_connected
+      # Yes; just merge the parent module’s options into ours
+      @opts = $.extend {}, @opts, @_module.opts
+    else
+      # No; call our own initialisator and all mounted submodules’
+      @_init()
+      instance._init?() for instance in instances
+
+    @trigger 'initialized'
+
+  _init: ->
 
   on: (args...) ->
     $(@).on args...
+    @
 
   off: (args...) ->
     $(@).off args...
+    @
 
   trigger: (args...) ->
+    $(@).trigger(args...)
+    @
+
+  triggerHandler: (args...) ->
     $(@).triggerHandler(args...)
 
   one: (args...) ->
     $(@).one args...
+    @
+
+  #COPIED:BEG{
+  _t: (args...) ->
+    @constructor._t args...
+
+  @_t: (key, args...) ->
+    result = @i18n[@locale]?[key] || ''
+
+    return result unless args.length > 0
+
+    result = result.replace /([^%]|^)%(?:(\d+)\$)?s/g, (p0, p, position) ->
+      if position
+        p + args[parseInt(position) - 1]
+      else
+        p + args.shift()
+
+    result.replace /%%s/g, '%s'
+
+  @i18n:
+    'en': {}
+    'zh-CN': {}
+
+  @locale: 'zh-CN'
+  #COPIED:END}
 
 module.exports = SimpleModule
